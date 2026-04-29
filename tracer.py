@@ -1,23 +1,24 @@
 from numba import njit
 import numpy as np
 from camera import *
-from sphere import *
+from triangles import *
 
 # Material should be of format: [r, g, b, luminance, reflectivity]
 # Rays should be of format: [origin_x, origin_y, origin_z, dir_x, dir_y, dir_z, r, g, b]
 # World would be a 2D array where each row represents a shape
-# For shapes, sphere should be of format: [material_id, position_x, position_y, position_z, radius]
 # ID of 0 corresponds to environment color. that is, sky
 @njit
 def trace_ray_path(ray: np.ndarray,
                    world: np.ndarray,
-                   point_hit: np.ndarray):
+                   point_hit: np.ndarray,
+                   ray_buffer: np.ndarray,
+                   debug_num=10):
     min_dist = 1e9
     closest_shape_idx = 0
     for idx in range(world.shape[0]):
         # Index 0 corresponds to sky
         if idx != 0:
-            intersection = calc_sphere_intersection(ray, world[idx])
+            intersection = calc_triangle_intersection(ray, world[idx], ray_buffer)
             if intersection < 0.0:
                 # The ray misses
                 pass
@@ -33,16 +34,16 @@ def trace_ray_path(ray: np.ndarray,
     return closest_shape_idx
 
 @njit
-def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, sphere: np.ndarray, buffer: np.ndarray, ray_buffer: np.ndarray):
+def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, triangle: np.ndarray, buffer: np.ndarray, ray_buffer: np.ndarray):
     NORMAL_BUFFER = 2
     
-    # Get sphere normal
-    sphere_normal(point, sphere=sphere, out_buffer=buffer[NORMAL_BUFFER])
+    # Get triangle normal
+    triangle_normal(ray, triangle=triangle, out_buffer=buffer[NORMAL_BUFFER])
     Nx, Ny, Nz = buffer[NORMAL_BUFFER, 0], buffer[NORMAL_BUFFER, 1], buffer[NORMAL_BUFFER, 2]
     point_x, point_y, point_z = point[0], point[1], point[2]
     dx, dy, dz = ray[3], ray[4], ray[5]
 
-    # Sample random point on the hemisphere
+    # Sample random point on the hemitriangle
     u_1 = np.random.random()
     u_2 = np.random.random()
 
@@ -76,10 +77,11 @@ def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, sphe
     return dot3(sampled_x, sampled_y, sampled_z, Nx, Ny, Nz)
 
 @njit
-def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int, source_idx: int, buffer: np.ndarray, shadow_ray: np.ndarray):
+def is_directly_illuminated(point: np.ndarray, ray: np.ndarray, world: np.ndarray, shape_idx: int, source_idx: int, buffer: np.ndarray, shadow_ray: np.ndarray):
     NORMAL_BUFFER = 2
     RAY_BUFFER = 3
     POINT_BUFFER = 4
+    RAY_BUFFER_2 = 7
 
     if shape_idx == source_idx:
         return True
@@ -87,7 +89,7 @@ def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int
     # First create a shadow ray from point to source body centre
     Cx, Cy, Cz = world[source_idx, 1], world[source_idx, 2], world[source_idx, 3]
     # Add a small vector parallel to normal to the point to avoid double intersection
-    sphere_normal(point=point, sphere=world[shape_idx], out_buffer=buffer[NORMAL_BUFFER])
+    triangle_normal(ray=ray, triangle=world[shape_idx], out_buffer=buffer[NORMAL_BUFFER])
     Ox, Oy, Oz = point[0] + buffer[NORMAL_BUFFER, 0]*1e-5, point[1] + buffer[NORMAL_BUFFER, 1]*1e-5, point[2] + buffer[NORMAL_BUFFER, 2]*1e-5
     
     # Direction to source
@@ -100,7 +102,7 @@ def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int
     buffer[RAY_BUFFER, 3], buffer[RAY_BUFFER, 4], buffer[RAY_BUFFER, 5] = Dx, Dy, Dz
 
     # Get nearest intersection
-    closest_idx = trace_ray_path(buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER])
+    closest_idx = trace_ray_path(buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2])
 
     if closest_idx == source_idx:
         shadow_ray[0], shadow_ray[1], shadow_ray[2], shadow_ray[3], shadow_ray[4], shadow_ray[5] = buffer[RAY_BUFFER, 0], buffer[RAY_BUFFER, 1], buffer[RAY_BUFFER, 2], buffer[RAY_BUFFER, 3], buffer[RAY_BUFFER, 4], buffer[RAY_BUFFER, 5]
@@ -109,12 +111,12 @@ def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int
         return False
     
 @njit
-def get_illuminance(point: np.ndarray, shape_idx: int, source_idx: int, world: np.ndarray, materials: np.ndarray, buffer: np.ndarray) -> float:
+def get_illuminance(point: np.ndarray, ray: np.ndarray, shape_idx: int, source_idx: int, world: np.ndarray, materials: np.ndarray, buffer: np.ndarray) -> float:
     SHADOW_BUFFER = 5
     NORMAL_BUFFER = 6
 
     # First check if directly illuminated
-    illuminated = is_directly_illuminated(point, world=world, shape_idx=shape_idx, source_idx=source_idx, buffer=buffer, shadow_ray=buffer[SHADOW_BUFFER])
+    illuminated = is_directly_illuminated(point, ray=ray, world=world, shape_idx=shape_idx, source_idx=source_idx, buffer=buffer, shadow_ray=buffer[SHADOW_BUFFER])
     if illuminated:
         # Return illuminance directly if hit the source
         if source_idx == shape_idx:
@@ -123,7 +125,7 @@ def get_illuminance(point: np.ndarray, shape_idx: int, source_idx: int, world: n
 
         # If illuminated, calculate the dot product between the shadow ray direction and normal
         Dx, Dy, Dz = buffer[SHADOW_BUFFER, 3], buffer[SHADOW_BUFFER, 4], buffer[SHADOW_BUFFER, 5]
-        sphere_normal(point, sphere=world[shape_idx], out_buffer=buffer[NORMAL_BUFFER])
+        triangle_normal(ray, triangle=world[shape_idx], out_buffer=buffer[NORMAL_BUFFER])
         Nx, Ny, Nz = buffer[NORMAL_BUFFER, 0], buffer[NORMAL_BUFFER, 1], buffer[NORMAL_BUFFER, 2]
         dot_prod = dot3(Dx, Dy, Dz, Nx, Ny, Nz)
 
@@ -149,9 +151,11 @@ def trace(i: int,
           source_idx: int, 
           materials: np.ndarray,
           buffer: np.ndarray, 
-          pixel: np.ndarray):
+          pixel: np.ndarray,
+          debug_num=10):
         RAY_BUFFER = 0
         POINT_BUFFER = 1
+        RAY_BUFFER_2 = 7
 
         pixel[0] = 0.0 
         pixel[1] = 0.0
@@ -161,12 +165,12 @@ def trace(i: int,
             bounce = num_bounces
             luminance = 0
             while bounce > 0:
-                closest_shape_idx = trace_ray_path(ray=buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER])
+                closest_shape_idx = trace_ray_path(ray=buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], debug_num=debug_num)
                 if closest_shape_idx == 0:
                     material_idx = int(world[0, 0])
                     luminance += materials[material_idx, 3]
                 else:
-                    luminance += get_illuminance(buffer[POINT_BUFFER], shape_idx=closest_shape_idx, source_idx=source_idx, world=world, materials=materials, buffer=buffer)
+                    luminance += get_illuminance(buffer[POINT_BUFFER], ray=buffer[RAY_BUFFER], shape_idx=closest_shape_idx, source_idx=source_idx, world=world, materials=materials, buffer=buffer)
 
                 material_idx = int(world[closest_shape_idx, 0])
                 pixel[0] += buffer[RAY_BUFFER, 6] * luminance * materials[material_idx, 0]  
@@ -178,7 +182,7 @@ def trace(i: int,
                     break
 
                 # Get a new ray for bounce
-                scaling_factor = get_random_dir(buffer[RAY_BUFFER], reflectivity=materials[material_idx, 4], point=buffer[POINT_BUFFER], sphere=world[closest_shape_idx], buffer=buffer, ray_buffer=buffer[RAY_BUFFER])
+                scaling_factor = get_random_dir(buffer[RAY_BUFFER], reflectivity=materials[material_idx, 4], point=buffer[POINT_BUFFER], triangle=world[closest_shape_idx], buffer=buffer, ray_buffer=buffer[RAY_BUFFER])
 
                 buffer[RAY_BUFFER, 6] *= materials[material_idx, 0] * scaling_factor
                 buffer[RAY_BUFFER, 7] *= materials[material_idx, 1] * scaling_factor
@@ -199,10 +203,12 @@ def trace_rays(height: int,
                materials: np.ndarray,
                fov: float, 
                buffer: np.ndarray,
-               img_buffer: np.ndarray):
+               img_buffer: np.ndarray,
+               debug_num=10):
     PIXEL_BUFFER = 7
     for i in range(width):
         for j in range(height):
+            debug_num -= 1
             trace(i=i,
                   j=j,
                   height=height,
@@ -214,5 +220,6 @@ def trace_rays(height: int,
                   source_idx=source_idx,
                   materials=materials,
                   buffer=buffer,
-                  pixel=buffer[PIXEL_BUFFER])
+                  pixel=buffer[PIXEL_BUFFER],
+                  debug_num=debug_num)
             img_buffer[i, j, 0], img_buffer[i, j, 1], img_buffer[i, j, 2] = buffer[PIXEL_BUFFER, 0], buffer[PIXEL_BUFFER, 1], buffer[PIXEL_BUFFER, 2]

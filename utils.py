@@ -15,3 +15,14 @@ def cross3(ax, ay, az, bx, by, bz):
     y = az * bx - ax * bz
     z = ax * by - ay * bx
     return x, y, z
+
+@njit
+def det2(a00, a01, a10, a11):
+    return a00 * a11 - a10 * a01
+
+@njit
+def det3(matrix: np.ndarray):
+    i_det2 = matrix[0, 0] * det2(matrix[1, 1], matrix[1, 2], matrix[2, 1], matrix[2, 2])
+    j_det2 = matrix[0, 1] * det2(matrix[1, 0], matrix[1, 2], matrix[2, 0], matrix[2, 2])
+    k_det2 = matrix[0, 2] * det2(matrix[1, 0], matrix[1, 1], matrix[2, 0], matrix[2, 1])
+    return i_det2 - j_det2 + k_det2
