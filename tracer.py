@@ -2,6 +2,7 @@ from numba import njit
 import numpy as np
 from camera import *
 from triangles import *
+from tqdm import tqdm
 
 # Material should be of format: [r, g, b, luminance, reflectivity]
 # Rays should be of format: [origin_x, origin_y, origin_z, dir_x, dir_y, dir_z, r, g, b]
@@ -193,7 +194,6 @@ def trace(i: int,
         pixel[1] /= num_rays
         pixel[2] /= num_rays
 
-@njit
 def trace_rays(height: int,
                width: int,
                num_rays_per_pixel: int,
@@ -206,7 +206,7 @@ def trace_rays(height: int,
                img_buffer: np.ndarray,
                debug_num=10):
     PIXEL_BUFFER = 7
-    for i in range(width):
+    for i in tqdm(range(width), desc="Rendering..."):
         for j in range(height):
             debug_num -= 1
             trace(i=i,
