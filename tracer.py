@@ -39,7 +39,7 @@ def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, tria
     NORMAL_BUFFER = 2
     
     # Get triangle normal
-    triangle_normal(ray, triangle=triangle, out_buffer=buffer[NORMAL_BUFFER])
+    triangle_normal(triangle=triangle, out_buffer=buffer[NORMAL_BUFFER])
     Nx, Ny, Nz = buffer[NORMAL_BUFFER, 0], buffer[NORMAL_BUFFER, 1], buffer[NORMAL_BUFFER, 2]
     point_x, point_y, point_z = point[0], point[1], point[2]
     dx, dy, dz = ray[3], ray[4], ray[5]
@@ -78,23 +78,24 @@ def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, tria
     return dot3(sampled_x, sampled_y, sampled_z, Nx, Ny, Nz)
 
 @njit
-def is_directly_illuminated(point: np.ndarray, ray: np.ndarray, world: np.ndarray, shape_idx: int, source_idx: int, buffer: np.ndarray, shadow_ray: np.ndarray):
+def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int, source_idx: int, buffer: np.ndarray, shadow_ray: np.ndarray):
     NORMAL_BUFFER = 2
     RAY_BUFFER = 3
     POINT_BUFFER = 4
-    RAY_BUFFER_2 = 7
+    RAY_BUFFER_2 = 8
 
     if shape_idx == source_idx:
         return True
 
     # First create a shadow ray from point to source body centre
-    Cx, Cy, Cz = world[source_idx, 1], world[source_idx, 2], world[source_idx, 3]
+    ax, ay, az, bx, by, bz, cx, cy, cz = world[source_idx, 1], world[source_idx, 2], world[source_idx, 3], world[source_idx, 4], world[source_idx, 5], world[source_idx, 6], world[source_idx, 7], world[source_idx, 8], world[source_idx, 9]
+    Cx, Cy, Cz = (ax+bx+cx)/3, (ay+by+cy)/3, (az+bz+cz)/3
     # Add a small vector parallel to normal to the point to avoid double intersection
-    triangle_normal(ray=ray, triangle=world[shape_idx], out_buffer=buffer[NORMAL_BUFFER])
+    triangle_normal(triangle=world[shape_idx], out_buffer=buffer[NORMAL_BUFFER])
     Ox, Oy, Oz = point[0] + buffer[NORMAL_BUFFER, 0]*1e-5, point[1] + buffer[NORMAL_BUFFER, 1]*1e-5, point[2] + buffer[NORMAL_BUFFER, 2]*1e-5
     
     # Direction to source
-    Dx, Dy, Dz = Cx - Ox, Cy- Oy, Cz - Oz
+    Dx, Dy, Dz = Cx - Ox, Cy - Oy, Cz - Oz
     magnitude = magn(Dx, Dy, Dz)
     Dx, Dy, Dz = Dx/(magnitude+1e-6), Dy/(magnitude+1e-6), Dz/(magnitude+1e-6)
 
@@ -112,12 +113,12 @@ def is_directly_illuminated(point: np.ndarray, ray: np.ndarray, world: np.ndarra
         return False
     
 @njit
-def get_illuminance(point: np.ndarray, ray: np.ndarray, shape_idx: int, source_idx: int, world: np.ndarray, materials: np.ndarray, buffer: np.ndarray) -> float:
+def get_illuminance(point: np.ndarray, shape_idx: int, source_idx: int, world: np.ndarray, materials: np.ndarray, buffer: np.ndarray) -> float:
     SHADOW_BUFFER = 5
     NORMAL_BUFFER = 6
 
     # First check if directly illuminated
-    illuminated = is_directly_illuminated(point, ray=ray, world=world, shape_idx=shape_idx, source_idx=source_idx, buffer=buffer, shadow_ray=buffer[SHADOW_BUFFER])
+    illuminated = is_directly_illuminated(point, world=world, shape_idx=shape_idx, source_idx=source_idx, buffer=buffer, shadow_ray=buffer[SHADOW_BUFFER])
     if illuminated:
         # Return illuminance directly if hit the source
         if source_idx == shape_idx:
@@ -126,7 +127,7 @@ def get_illuminance(point: np.ndarray, ray: np.ndarray, shape_idx: int, source_i
 
         # If illuminated, calculate the dot product between the shadow ray direction and normal
         Dx, Dy, Dz = buffer[SHADOW_BUFFER, 3], buffer[SHADOW_BUFFER, 4], buffer[SHADOW_BUFFER, 5]
-        triangle_normal(ray, triangle=world[shape_idx], out_buffer=buffer[NORMAL_BUFFER])
+        triangle_normal(triangle=world[shape_idx], out_buffer=buffer[NORMAL_BUFFER])
         Nx, Ny, Nz = buffer[NORMAL_BUFFER, 0], buffer[NORMAL_BUFFER, 1], buffer[NORMAL_BUFFER, 2]
         dot_prod = dot3(Dx, Dy, Dz, Nx, Ny, Nz)
 
@@ -156,7 +157,7 @@ def trace(i: int,
           debug_num=10):
         RAY_BUFFER = 0
         POINT_BUFFER = 1
-        RAY_BUFFER_2 = 7
+        RAY_BUFFER_2 = 8
 
         pixel[0] = 0.0 
         pixel[1] = 0.0
@@ -171,7 +172,7 @@ def trace(i: int,
                     material_idx = int(world[0, 0])
                     luminance += materials[material_idx, 3]
                 else:
-                    luminance += get_illuminance(buffer[POINT_BUFFER], ray=buffer[RAY_BUFFER], shape_idx=closest_shape_idx, source_idx=source_idx, world=world, materials=materials, buffer=buffer)
+                    luminance += get_illuminance(buffer[POINT_BUFFER], shape_idx=closest_shape_idx, source_idx=source_idx, world=world, materials=materials, buffer=buffer)
 
                 material_idx = int(world[closest_shape_idx, 0])
                 pixel[0] += buffer[RAY_BUFFER, 6] * luminance * materials[material_idx, 0]  
@@ -189,7 +190,7 @@ def trace(i: int,
                 buffer[RAY_BUFFER, 7] *= materials[material_idx, 1] * scaling_factor
                 buffer[RAY_BUFFER, 8] *= materials[material_idx, 2] * scaling_factor
                 bounce -= 1
-
+            #print("Luminance: ", luminance, "    \r")
         pixel[0] /= num_rays
         pixel[1] /= num_rays
         pixel[2] /= num_rays

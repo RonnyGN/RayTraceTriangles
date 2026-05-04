@@ -11,7 +11,7 @@ def calc_triangle_intersection(ray: np.ndarray, triangle: np.ndarray, ray_buffer
     ox, oy, oz, dx, dy, dz = ray[0], ray[1], ray[2], ray[3], ray[4], ray[5]
 
     # Triangle normal
-    triangle_normal(ray, triangle, ray_buffer)
+    triangle_normal(triangle, ray_buffer)
     nx, ny, nz = ray_buffer[0], ray_buffer[1], ray_buffer[2]
 
     # Check if parallel
@@ -53,26 +53,5 @@ def calc_triangle_intersection(ray: np.ndarray, triangle: np.ndarray, ray_buffer
 
 # It is to be ensured that point lies on the triangle
 @njit
-def triangle_normal(ray: np.ndarray, triangle: np.ndarray, out_buffer: np.ndarray):
-    dx, dy, dz = ray[3], ray[4], ray[5]
-    ax, ay, az, bx, by, bz, cx, cy, cz = triangle[1], triangle[2], triangle[3], triangle[4], triangle[5], triangle[6], triangle[7], triangle[8], triangle[9]
-
-    # Get difference of both points to get a vector parallel to the triangle
-    p1x, p1y, p1z = ax - bx, ay - by, az - bz
-    p2x, p2y, p2z = ax - cx, ay - cy, az - cz
-
-    # Get the normal
-    nx, ny, nz = cross3(p1x, p1y, p1z, p2x, p2y, p2z)
-    magnitude = magn(nx, ny, nz) + 1e-7
-    nx /= magnitude
-    ny /= magnitude
-    nz /= magnitude
-
-    # Find dot product between the normal and the ray_dir
-    dot_prod = dot3(nx, ny, nz, dx, dy, dz)
-    
-    # Reflect normal if dot product is greater than 0
-    if dot_prod >= 0:
-        out_buffer[0], out_buffer[1], out_buffer[2] = -nx, -ny, -nz
-    else: 
-        out_buffer[0], out_buffer[1], out_buffer[2] = nx, ny, nz   
+def triangle_normal(triangle: np.ndarray, out_buffer: np.ndarray):
+    out_buffer[0], out_buffer[1], out_buffer[2] = triangle[10], triangle[11], triangle[12]

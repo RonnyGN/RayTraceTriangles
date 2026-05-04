@@ -13,6 +13,7 @@ class Object:
     def load_world(self, material_id):
         vertices = []
         triangles = []
+        normals = []
         with open(self.path, 'r') as f:
             for line in tqdm(f.readlines(), desc=f"Loading object {self.name}..."):
                 line = line.split(' ')
@@ -26,13 +27,20 @@ class Object:
                     vertex += self.translate_coords
                     
                     vertices.append(vertex)
+                elif line[0] == 'vn':
+                    normal = np.array([float(i) for i in line[1:]])
+                    normal = normal @ self.rotation_matrix.T
+                    normals.append(normal)
                 elif line[0] == 'f':
                     faces = np.array([int(i.split('/')[0])-1 for i in line[1:]])
+                    face_normals = np.array([int(i.split('/')[-1])-1 for i in line[1:]])
                     fx, fy, fz = faces
+                    nf, _, _ = face_normals
 
-                    triangle = np.zeros((10))
+                    triangle = np.zeros((13))
                     triangle[0] = material_id
-                    triangle[1:] = np.hstack((vertices[fx], vertices[fy], vertices[fz]))
+                    triangle[1:10] = np.hstack((vertices[fx], vertices[fy], vertices[fz]))
+                    triangle[10:] = normals[nf]
                     triangles.append(triangle)
 
         return np.stack(triangles)
