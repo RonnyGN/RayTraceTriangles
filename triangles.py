@@ -16,16 +16,16 @@ def calc_triangle_intersection(ray: np.ndarray, triangle: np.ndarray, ray_buffer
 
     # Check if parallel
     dot_prod = dot3(dx, dy, dz, nx, ny, nz)
-    if abs(dot_prod) <= 10e-4:
+    if abs(dot_prod) <= 1e-11:
         return -1.0
     
     # Check plane intersection
     a_minus_o_x, a_minus_o_y, a_minus_o_z = ax - ox, ay - oy, az - oz
     numerator = dot3(a_minus_o_x, a_minus_o_y, a_minus_o_z, nx, ny, nz)
     denominator = dot3(dx, dy, dz, nx, ny, nz)
-    t = numerator/(denominator+1e-7)
+    t = numerator/denominator
 
-    if t <= 0:
+    if t <= 1e-6:
         return -1.0
     
     # Check if o + dt lies inside the triangle
@@ -46,7 +46,7 @@ def calc_triangle_intersection(ray: np.ndarray, triangle: np.ndarray, ray_buffer
     dot_prod_2 = dot3(c2x, c2y, c2z, nx, ny, nz)
     dot_prod_3 = dot3(c3x, c3y, c3z, nx, ny, nz)
 
-    if (dot_prod_1 >= -1e-9 and dot_prod_2 >= -1e-9 and dot_prod_3 >= -1e-9) or (dot_prod_1 <= 1e-9 and dot_prod_2 <= 1e-9 and dot_prod_3 <= 1e-9):
+    if (dot_prod_1 >= 1e-9 and dot_prod_2 >= 1e-9 and dot_prod_3 >= 1e-9) or (dot_prod_1 <= -1e-9 and dot_prod_2 <= -1e-9 and dot_prod_3 <= -1e-9):
         return t
     else:
         return -1.0

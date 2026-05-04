@@ -32,15 +32,35 @@ class Object:
                     normal = normal @ self.rotation_matrix.T
                     normals.append(normal)
                 elif line[0] == 'f':
-                    faces = np.array([int(i.split('/')[0])-1 for i in line[1:]])
-                    face_normals = np.array([int(i.split('/')[-1])-1 for i in line[1:]])
-                    fx, fy, fz = faces
-                    nf, _, _ = face_normals
+                    face_parts = [p.split('/') for p in line[1:]]
+                    v_idxs = [int(p[0]) - 1 for p in face_parts]
+                    
+                    v0 = vertices[v_idxs[0]]
+                    v1 = vertices[v_idxs[1]]
+                    v2 = vertices[v_idxs[2]]
 
-                    triangle = np.zeros((13))
+                    edge1 = v1 - v0
+                    edge2 = v2 - v0
+                    
+                    nx = edge1[1] * edge2[2] - edge1[2] * edge2[1]
+                    ny = edge1[2] * edge2[0] - edge1[0] * edge2[2]
+                    nz = edge1[0] * edge2[1] - edge1[1] * edge2[0]
+                    
+                    mag = (nx**2 + ny**2 + nz**2)**0.5
+                    if mag > 0:
+                        nx /= mag
+                        ny /= mag
+                        nz /= mag
+
+                    triangle = np.zeros(13)
                     triangle[0] = material_id
-                    triangle[1:10] = np.hstack((vertices[fx], vertices[fy], vertices[fz]))
-                    triangle[10:] = normals[nf]
+
+                    triangle[1:4] = v0
+                    triangle[4:7] = v1
+                    triangle[7:10] = v2
+
+                    triangle[10], triangle[11], triangle[12] = nx, ny, nz
+                    
                     triangles.append(triangle)
 
         return np.stack(triangles)
