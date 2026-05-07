@@ -2,6 +2,7 @@ from numba import njit
 import numpy as np
 from camera import *
 from triangles import *
+from bvh import *
 from tqdm import tqdm
 
 # Material should be of format: [r, g, b, luminance, reflectivity]
@@ -13,9 +14,15 @@ def trace_ray_path(ray: np.ndarray,
                    world: np.ndarray,
                    point_hit: np.ndarray,
                    ray_buffer: np.ndarray,
+                   bvh: np.ndarray,
                    debug_num=10):
     min_dist = 1e9
     closest_shape_idx = 0
+
+    # Calculate intersection with bounding box
+    if not box_intersection(box=bvh, ray=ray):
+        return closest_shape_idx
+    
     for idx in range(world.shape[0]):
         # Index 0 corresponds to sky
         if idx != 0:
@@ -78,7 +85,7 @@ def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, tria
     return dot3(sampled_x, sampled_y, sampled_z, Nx, Ny, Nz)
 
 @njit
-def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int, source_idx: int, buffer: np.ndarray, shadow_ray: np.ndarray):
+def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int, source_idx: int, buffer: np.ndarray, shadow_ray: np.ndarray, bvh: np.ndarray):
     NORMAL_BUFFER = 2
     RAY_BUFFER = 3
     POINT_BUFFER = 4
@@ -104,7 +111,7 @@ def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int
     buffer[RAY_BUFFER, 3], buffer[RAY_BUFFER, 4], buffer[RAY_BUFFER, 5] = Dx, Dy, Dz
 
     # Get nearest intersection
-    closest_idx = trace_ray_path(buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2])
+    closest_idx = trace_ray_path(buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], bvh=bvh)
 
     if closest_idx == source_idx:
         shadow_ray[0], shadow_ray[1], shadow_ray[2], shadow_ray[3], shadow_ray[4], shadow_ray[5] = buffer[RAY_BUFFER, 0], buffer[RAY_BUFFER, 1], buffer[RAY_BUFFER, 2], buffer[RAY_BUFFER, 3], buffer[RAY_BUFFER, 4], buffer[RAY_BUFFER, 5]
@@ -113,12 +120,12 @@ def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int
         return False
     
 @njit
-def get_illuminance(point: np.ndarray, shape_idx: int, source_idx: int, world: np.ndarray, materials: np.ndarray, buffer: np.ndarray) -> float:
+def get_illuminance(point: np.ndarray, shape_idx: int, source_idx: int, world: np.ndarray, materials: np.ndarray, buffer: np.ndarray, bvh: np.ndarray) -> float:
     SHADOW_BUFFER = 5
     NORMAL_BUFFER = 6
 
     # First check if directly illuminated
-    illuminated = is_directly_illuminated(point, world=world, shape_idx=shape_idx, source_idx=source_idx, buffer=buffer, shadow_ray=buffer[SHADOW_BUFFER])
+    illuminated = is_directly_illuminated(point, world=world, shape_idx=shape_idx, source_idx=source_idx, buffer=buffer, shadow_ray=buffer[SHADOW_BUFFER], bvh=bvh)
     if illuminated:
         # Return illuminance directly if hit the source
         if source_idx == shape_idx:
@@ -154,6 +161,7 @@ def trace(i: int,
           materials: np.ndarray,
           buffer: np.ndarray, 
           pixel: np.ndarray,
+          bvh: np.ndarray,
           debug_num=10):
         RAY_BUFFER = 0
         POINT_BUFFER = 1
@@ -167,12 +175,12 @@ def trace(i: int,
             bounce = num_bounces
             luminance = 0
             while bounce > 0:
-                closest_shape_idx = trace_ray_path(ray=buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], debug_num=debug_num)
+                closest_shape_idx = trace_ray_path(ray=buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], bvh=bvh, debug_num=debug_num)
                 if closest_shape_idx == 0:
                     material_idx = int(world[0, 0])
                     luminance += materials[material_idx, 3]
                 else:
-                    luminance += get_illuminance(buffer[POINT_BUFFER], shape_idx=closest_shape_idx, source_idx=source_idx, world=world, materials=materials, buffer=buffer)
+                    luminance += get_illuminance(buffer[POINT_BUFFER], shape_idx=closest_shape_idx, source_idx=source_idx, world=world, materials=materials, buffer=buffer, bvh=bvh)
 
                 material_idx = int(world[closest_shape_idx, 0])
                 pixel[0] += buffer[RAY_BUFFER, 6] * luminance * materials[material_idx, 0]  
@@ -205,6 +213,7 @@ def trace_rays(height: int,
                fov: float, 
                buffer: np.ndarray,
                img_buffer: np.ndarray,
+               bvh: np.ndarray,
                debug_num=10):
     PIXEL_BUFFER = 7
     for i in tqdm(range(width), desc="Rendering..."):
@@ -222,5 +231,6 @@ def trace_rays(height: int,
                   materials=materials,
                   buffer=buffer,
                   pixel=buffer[PIXEL_BUFFER],
+                  bvh=bvh,
                   debug_num=debug_num)
             img_buffer[i, j, 0], img_buffer[i, j, 1], img_buffer[i, j, 2] = buffer[PIXEL_BUFFER, 0], buffer[PIXEL_BUFFER, 1], buffer[PIXEL_BUFFER, 2]
