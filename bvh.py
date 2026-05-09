@@ -70,3 +70,124 @@ def box_intersection(box, ray):
     else:
         return False 
     
+@njit
+def axis_len(bvh):
+    return abs(bvh[MAX_X] - bvh[MIN_X]), abs(bvh[MAX_Y] - bvh[MIN_Y]), abs(bvh[MAX_Z] - bvh[MIN_Z])
+    
+# Main work on BVH starts from here, God please wish me luck
+@njit
+def init_parent(parent_bvh, triangles: np.ndarray):
+    init_box(parent_bvh)
+    add_triangles(triangles, parent_bvh)
+
+    # Checks would be done to ensure this is the parent node based on this -1.0 later in code (if neccassiry)
+    parent_bvh[PARENT] = -1.0
+    parent_bvh[COUNT] = triangles.shape[0]
+    parent_bvh[START_INDEX] = 0.0
+
+@njit 
+def split(bvh, index, triangles, triangle_indices, childA_buffer, childB_buffer, buffer, arranged_indices):
+    # Check longest bvh axis, and split from there
+    split_x, split_y, split_z = 0.0, 0.0, 0.0
+    len_x, len_y, len_z = axis_len(bvh)
+    parent_index = index
+    triangle_len = triangle_indices.shape[0]
+    offset = bvh[START_INDEX]
+
+    init_box(childA_buffer)
+    init_box(childB_buffer)
+
+    childA_buffer[PARENT] = parent_index
+    childB_buffer[PARENT] = parent_index
+    
+    if (len_x >= len_y) and (len_x >= len_z):
+        split_x = (bvh[MIN_X] + bvh[MAX_X])/2
+        split_axis = 0
+    elif (len_y >= len_x) and (len_y >= len_z):
+        split_y = (bvh[MIN_Y] + bvh[MAX_Y])/2
+        split_axis = 1
+    else:
+        split_z = (bvh[MIN_Z] + bvh[MAX_Z])/2
+        split_axis = 2
+
+    left_count = 0
+    right_count = 0
+    both_count = 0
+    for i in triangle_indices:
+        ax, ay, az, bx, by, bz, cx, cy, cz = triangles[i, 1], triangles[i, 2], triangles[i, 3], \
+                                            triangles[i, 4], triangles[i, 5], triangles[i, 6], \
+                                            triangles[i, 7], triangles[i, 8], triangles[i, 9]
+        
+        is_left = False
+        is_right = False
+        if split_axis == 0:
+            if (ax >= split_x) or (bx >= split_x) or (cx >= split_x):
+                add_triangle(childA_buffer, triangles[i])
+                childA_buffer[COUNT] += 1.0
+                is_left = True
+                left_count += 1
+            if (ax <= split_x) or (bx <= split_x) or (cx <= split_x):
+                add_triangle(childB_buffer, triangles[i])
+                childB_buffer[COUNT] += 1.0
+                is_right = True
+                right_count += 1
+
+            if is_left and (not is_right):
+                arranged_indices[left_count - 1] = i
+            elif (not is_left) and is_right:
+                arranged_indices[triangle_len - right_count] = i
+            elif is_left and is_right:
+                both_count += 1
+                left_count -= 1
+                right_count -= 1
+                buffer[both_count - 1] = i
+        
+        elif split_axis == 1:
+            if (ay >= split_y) or (by >= split_y) or (cy >= split_y):
+                add_triangle(childA_buffer, triangles[i])
+                childA_buffer[COUNT] += 1.0
+                is_left = True
+                left_count += 1
+            if (ay <= split_y) or (by <= split_y) or (cy <= split_y):
+                add_triangle(childB_buffer, triangles[i])
+                childB_buffer[COUNT] += 1.0
+                is_right = True
+                right_count += 1
+
+            if is_left and (not is_right):
+                arranged_indices[left_count - 1] = i
+            elif (not is_left) and is_right:
+                arranged_indices[triangle_len - right_count] = i
+            elif is_left and is_right:
+                both_count += 1
+                left_count -= 1
+                right_count -= 1
+                buffer[both_count - 1] = i
+        
+        elif split_axis == 2:
+            if (az >= split_z) or (bz >= split_z) or (cz >= split_z):
+                add_triangle(childA_buffer, triangles[i])
+                childA_buffer[COUNT] += 1.0
+                is_left = True
+                left_count += 1
+            if (az <= split_z) or (bz <= split_z) or (cz <= split_z):
+                add_triangle(childB_buffer, triangles[i])
+                childB_buffer[COUNT] += 1.0
+                is_right = True
+                right_count += 1
+
+            if is_left and (not is_right):
+                arranged_indices[left_count - 1] = i
+            elif (not is_left) and is_right:
+                arranged_indices[triangle_len - right_count] = i
+            elif is_left and is_right:
+                both_count += 1
+                left_count -= 1
+                right_count -= 1
+                buffer[both_count - 1] = i
+
+    for j in range(both_count):
+        arranged_indices[left_count + j] = buffer[j]
+
+    childA_buffer[START_INDEX] = offset
+    childB_buffer[START_INDEX] = offset + childA_buffer[COUNT]   
