@@ -1,6 +1,7 @@
 import numpy as np
 from numba import njit
 from utils import *
+from tqdm import tqdm
 
 # Bounding boxes to be of format [min_x, min_y, min_z, max_x, max_y, max_z, start_index, count,
 #                                 childA_index, childB_index, parent_index]
@@ -117,77 +118,100 @@ def split(bvh, index, triangles, triangle_indices, childA_buffer, childB_buffer,
         ax, ay, az, bx, by, bz, cx, cy, cz = triangles[i, 1], triangles[i, 2], triangles[i, 3], \
                                             triangles[i, 4], triangles[i, 5], triangles[i, 6], \
                                             triangles[i, 7], triangles[i, 8], triangles[i, 9]
-        
+        centre_x = (ax + bx + cx)/3
+        centre_y = (ay + by + cy)/3
+        centre_z = (az + bz + cz)/3
         is_left = False
         is_right = False
         if split_axis == 0:
-            if (ax >= split_x) or (bx >= split_x) or (cx >= split_x):
+            if centre_x > split_x:
                 add_triangle(childA_buffer, triangles[i])
                 childA_buffer[COUNT] += 1.0
                 is_left = True
                 left_count += 1
-            if (ax <= split_x) or (bx <= split_x) or (cx <= split_x):
+            if centre_x < split_x:
                 add_triangle(childB_buffer, triangles[i])
                 childB_buffer[COUNT] += 1.0
                 is_right = True
                 right_count += 1
 
-            if is_left and (not is_right):
+            if is_left:
                 arranged_indices[left_count - 1] = i
-            elif (not is_left) and is_right:
+            elif is_right:
                 arranged_indices[triangle_len - right_count] = i
-            elif is_left and is_right:
-                both_count += 1
-                left_count -= 1
-                right_count -= 1
-                buffer[both_count - 1] = i
         
         elif split_axis == 1:
-            if (ay >= split_y) or (by >= split_y) or (cy >= split_y):
+            if centre_y > split_y:
                 add_triangle(childA_buffer, triangles[i])
                 childA_buffer[COUNT] += 1.0
                 is_left = True
                 left_count += 1
-            if (ay <= split_y) or (by <= split_y) or (cy <= split_y):
+            if centre_y < split_y:
                 add_triangle(childB_buffer, triangles[i])
                 childB_buffer[COUNT] += 1.0
                 is_right = True
                 right_count += 1
 
-            if is_left and (not is_right):
+            if is_left:
                 arranged_indices[left_count - 1] = i
-            elif (not is_left) and is_right:
+            elif is_right:
                 arranged_indices[triangle_len - right_count] = i
-            elif is_left and is_right:
-                both_count += 1
-                left_count -= 1
-                right_count -= 1
-                buffer[both_count - 1] = i
         
         elif split_axis == 2:
-            if (az >= split_z) or (bz >= split_z) or (cz >= split_z):
+            if centre_z > split_z:
                 add_triangle(childA_buffer, triangles[i])
                 childA_buffer[COUNT] += 1.0
                 is_left = True
                 left_count += 1
-            if (az <= split_z) or (bz <= split_z) or (cz <= split_z):
+            if centre_z < split_z:
                 add_triangle(childB_buffer, triangles[i])
                 childB_buffer[COUNT] += 1.0
                 is_right = True
                 right_count += 1
 
-            if is_left and (not is_right):
+            if is_left:
                 arranged_indices[left_count - 1] = i
-            elif (not is_left) and is_right:
+            elif is_right:
                 arranged_indices[triangle_len - right_count] = i
-            elif is_left and is_right:
-                both_count += 1
-                left_count -= 1
-                right_count -= 1
-                buffer[both_count - 1] = i
-
-    for j in range(both_count):
-        arranged_indices[left_count + j] = buffer[j]
 
     childA_buffer[START_INDEX] = offset
     childB_buffer[START_INDEX] = offset + childA_buffer[COUNT]   
+
+def run_split(triangles, num_split):
+    triangle_indices = np.array(range(triangles.shape[0]))
+    bvh_buffer = np.zeros((11))
+
+    bvhs = []
+
+    # Init the parent
+    init_parent(bvh_buffer, triangles)
+    bvhs.append(bvh_buffer)
+
+    for i in tqdm(range(num_split), desc="Initializing BVHs..."):
+        bvh = bvhs[i]
+        start_index = int(bvh[START_INDEX])
+        end_index = int(start_index + bvh[COUNT])
+        tri_indices = triangle_indices[start_index:end_index]
+        arranged_indices = np.zeros_like(tri_indices)
+
+        bvh_buffer_children = np.zeros((2, 11))
+        split(bvh,
+              index=i,
+              triangles=triangles,
+              triangle_indices=tri_indices,
+              childA_buffer=bvh_buffer_children[0],
+              childB_buffer=bvh_buffer_children[1],
+              buffer=np.zeros_like(tri_indices),
+              arranged_indices=arranged_indices)
+        
+        bvhs.append(bvh_buffer_children[0])
+        bvhs.append(bvh_buffer_children[1])
+
+        # Update the parent bvh children indices
+        bvhs[i][CHILDA] = len(bvhs) - 2
+        bvhs[i][CHILDB] = len(bvhs) - 1
+
+        # Update the triangle indices
+        triangle_indices[start_index:end_index] = arranged_indices
+
+    return np.stack(bvhs), triangle_indices

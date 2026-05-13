@@ -1,4 +1,5 @@
-from numba import njit
+from numba import njit, int64
+from numba.typed import List
 import numpy as np
 from camera import *
 from triangles import *
@@ -9,21 +10,62 @@ from tqdm import tqdm
 # Rays should be of format: [origin_x, origin_y, origin_z, dir_x, dir_y, dir_z, r, g, b]
 # World would be a 2D array where each row represents a shape
 # ID of 0 corresponds to environment color. that is, sky
+VIP_INDICES = np.array([0, 1, 2])
 @njit
 def trace_ray_path(ray: np.ndarray,
                    world: np.ndarray,
                    point_hit: np.ndarray,
                    ray_buffer: np.ndarray,
                    bvh: np.ndarray,
+                   triangle_indices: np.ndarray,
+                   stack_ptr,
                    debug_num=10):
-    min_dist = 1e9
-    closest_shape_idx = 0
 
-    # Calculate intersection with bounding box
-    if not box_intersection(box=bvh, ray=ray):
-        return closest_shape_idx
+    closest_shape_idx = 0
+    stack_ptr.append(0)
+    # Check box inetrsection
+    while True:
+        if len(stack_ptr) == 0:
+            break
+        box_id = stack_ptr.pop()
+        hit = box_intersection(bvh[box_id], ray=ray)
+        idA = int(bvh[box_id, CHILDA])
+        idB = int(bvh[box_id, CHILDB])
+        bvh[box_id, CHILDA] = 0.0
+        bvh[box_id, CHILDB] = 0.0
+
+        if hit and (idA != 0.0):
+            stack_ptr.append(idA)
+            stack_ptr.append(idB)
+
+        elif hit and (idA == 0.0):
+            start_index = int(bvh[box_id, START_INDEX])
+            end_index = int(bvh[box_id, COUNT] + start_index)
+            if bvh[box_id, COUNT] != 0.0: 
+                min_dist = 1e9
+                for idx in triangle_indices[start_index:end_index]:
+                    # Index 0 corresponds to sky
+                    if idx != 0:
+                        intersection = calc_triangle_intersection(ray, world[idx], ray_buffer)
+                        if intersection < 0.0:
+                            # The ray misses
+                            pass
+                        else:
+                            if min_dist > intersection:
+                                min_dist = intersection
+                                closest_shape_idx = idx
+                            else:
+                                pass
+                ox, oy, oz = ray[0], ray[1], ray[2]
+                dx, dy, dz = ray[3], ray[4], ray[5]
+                point_hit[0], point_hit[1], point_hit[2] = ox + dx*min_dist, oy + dy*min_dist, oz + dz*min_dist
+                if closest_shape_idx != 0: return closest_shape_idx 
+        elif not hit:
+            pass
     
-    for idx in range(world.shape[0]):
+    closest_shape_idx = 0
+    min_dist = 1e9
+    for idx in VIP_INDICES:
         # Index 0 corresponds to sky
         if idx != 0:
             intersection = calc_triangle_intersection(ray, world[idx], ray_buffer)
@@ -40,7 +82,7 @@ def trace_ray_path(ray: np.ndarray,
     dx, dy, dz = ray[3], ray[4], ray[5]
     point_hit[0], point_hit[1], point_hit[2] = ox + dx*min_dist, oy + dy*min_dist, oz + dz*min_dist
     return closest_shape_idx
-
+    
 @njit
 def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, triangle: np.ndarray, buffer: np.ndarray, ray_buffer: np.ndarray):
     NORMAL_BUFFER = 2
@@ -85,7 +127,7 @@ def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, tria
     return dot3(sampled_x, sampled_y, sampled_z, Nx, Ny, Nz)
 
 @njit
-def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int, source_idx: int, buffer: np.ndarray, shadow_ray: np.ndarray, bvh: np.ndarray):
+def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int, source_idx: int, buffer: np.ndarray, shadow_ray: np.ndarray, bvh: np.ndarray, triangle_indices: np.ndarray, stack_ptr):
     NORMAL_BUFFER = 2
     RAY_BUFFER = 3
     POINT_BUFFER = 4
@@ -111,7 +153,7 @@ def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int
     buffer[RAY_BUFFER, 3], buffer[RAY_BUFFER, 4], buffer[RAY_BUFFER, 5] = Dx, Dy, Dz
 
     # Get nearest intersection
-    closest_idx = trace_ray_path(buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], bvh=bvh)
+    closest_idx = trace_ray_path(buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], bvh=bvh, triangle_indices=triangle_indices, stack_ptr=stack_ptr)
 
     if closest_idx == source_idx:
         shadow_ray[0], shadow_ray[1], shadow_ray[2], shadow_ray[3], shadow_ray[4], shadow_ray[5] = buffer[RAY_BUFFER, 0], buffer[RAY_BUFFER, 1], buffer[RAY_BUFFER, 2], buffer[RAY_BUFFER, 3], buffer[RAY_BUFFER, 4], buffer[RAY_BUFFER, 5]
@@ -120,12 +162,12 @@ def is_directly_illuminated(point: np.ndarray, world: np.ndarray, shape_idx: int
         return False
     
 @njit
-def get_illuminance(point: np.ndarray, shape_idx: int, source_idx: int, world: np.ndarray, materials: np.ndarray, buffer: np.ndarray, bvh: np.ndarray) -> float:
+def get_illuminance(point: np.ndarray, shape_idx: int, source_idx: int, world: np.ndarray, materials: np.ndarray, buffer: np.ndarray, bvh: np.ndarray, triangle_indices: np.ndarray, stack_ptr) -> float:
     SHADOW_BUFFER = 5
     NORMAL_BUFFER = 6
 
     # First check if directly illuminated
-    illuminated = is_directly_illuminated(point, world=world, shape_idx=shape_idx, source_idx=source_idx, buffer=buffer, shadow_ray=buffer[SHADOW_BUFFER], bvh=bvh)
+    illuminated = is_directly_illuminated(point, world=world, shape_idx=shape_idx, source_idx=source_idx, buffer=buffer, shadow_ray=buffer[SHADOW_BUFFER], bvh=bvh, triangle_indices=triangle_indices, stack_ptr=stack_ptr)
     if illuminated:
         # Return illuminance directly if hit the source
         if source_idx == shape_idx:
@@ -162,6 +204,8 @@ def trace(i: int,
           buffer: np.ndarray, 
           pixel: np.ndarray,
           bvh: np.ndarray,
+          triangle_indices: np.ndarray,
+          stack_ptr,
           debug_num=10):
         RAY_BUFFER = 0
         POINT_BUFFER = 1
@@ -175,12 +219,12 @@ def trace(i: int,
             bounce = num_bounces
             luminance = 0
             while bounce > 0:
-                closest_shape_idx = trace_ray_path(ray=buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], bvh=bvh, debug_num=debug_num)
+                closest_shape_idx = trace_ray_path(ray=buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], bvh=bvh, triangle_indices=triangle_indices, debug_num=debug_num, stack_ptr=stack_ptr)
                 if closest_shape_idx == 0:
                     material_idx = int(world[0, 0])
                     luminance += materials[material_idx, 3]
                 else:
-                    luminance += get_illuminance(buffer[POINT_BUFFER], shape_idx=closest_shape_idx, source_idx=source_idx, world=world, materials=materials, buffer=buffer, bvh=bvh)
+                    luminance += get_illuminance(buffer[POINT_BUFFER], shape_idx=closest_shape_idx, source_idx=source_idx, world=world, materials=materials, buffer=buffer, bvh=bvh, triangle_indices=triangle_indices, stack_ptr=stack_ptr)
 
                 material_idx = int(world[closest_shape_idx, 0])
                 pixel[0] += buffer[RAY_BUFFER, 6] * luminance * materials[material_idx, 0]  
@@ -214,6 +258,8 @@ def trace_rays(height: int,
                buffer: np.ndarray,
                img_buffer: np.ndarray,
                bvh: np.ndarray,
+               triangle_indices: np.ndarray,
+               stack_ptr,
                debug_num=10):
     PIXEL_BUFFER = 7
     for i in tqdm(range(width), desc="Rendering..."):
@@ -232,5 +278,7 @@ def trace_rays(height: int,
                   buffer=buffer,
                   pixel=buffer[PIXEL_BUFFER],
                   bvh=bvh,
+                  triangle_indices=triangle_indices,
+                  stack_ptr=stack_ptr,
                   debug_num=debug_num)
             img_buffer[i, j, 0], img_buffer[i, j, 1], img_buffer[i, j, 2] = buffer[PIXEL_BUFFER, 0], buffer[PIXEL_BUFFER, 1], buffer[PIXEL_BUFFER, 2]
