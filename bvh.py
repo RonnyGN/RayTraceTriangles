@@ -67,9 +67,9 @@ def box_intersection(box, ray):
                 max(t0z, t1z))
 
     if (t_near <= t_far) and (t_far >= 1e-9):
-        return True
+        return True, t_near
     else:
-        return False 
+        return False, -1.0
     
 @njit
 def axis_len(bvh):
@@ -113,7 +113,6 @@ def split(bvh, index, triangles, triangle_indices, childA_buffer, childB_buffer,
 
     left_count = 0
     right_count = 0
-    both_count = 0
     for i in triangle_indices:
         ax, ay, az, bx, by, bz, cx, cy, cz = triangles[i, 1], triangles[i, 2], triangles[i, 3], \
                                             triangles[i, 4], triangles[i, 5], triangles[i, 6], \
@@ -124,7 +123,7 @@ def split(bvh, index, triangles, triangle_indices, childA_buffer, childB_buffer,
         is_left = False
         is_right = False
         if split_axis == 0:
-            if centre_x > split_x:
+            if centre_x >= split_x:
                 add_triangle(childA_buffer, triangles[i])
                 childA_buffer[COUNT] += 1.0
                 is_left = True
@@ -141,7 +140,7 @@ def split(bvh, index, triangles, triangle_indices, childA_buffer, childB_buffer,
                 arranged_indices[triangle_len - right_count] = i
         
         elif split_axis == 1:
-            if centre_y > split_y:
+            if centre_y >= split_y:
                 add_triangle(childA_buffer, triangles[i])
                 childA_buffer[COUNT] += 1.0
                 is_left = True
@@ -158,7 +157,7 @@ def split(bvh, index, triangles, triangle_indices, childA_buffer, childB_buffer,
                 arranged_indices[triangle_len - right_count] = i
         
         elif split_axis == 2:
-            if centre_z > split_z:
+            if centre_z >= split_z:
                 add_triangle(childA_buffer, triangles[i])
                 childA_buffer[COUNT] += 1.0
                 is_left = True
@@ -177,7 +176,7 @@ def split(bvh, index, triangles, triangle_indices, childA_buffer, childB_buffer,
     childA_buffer[START_INDEX] = offset
     childB_buffer[START_INDEX] = offset + childA_buffer[COUNT]   
 
-def run_split(triangles, num_split):
+def run_split(triangles, max_iter, max_leaf_size=6):
     triangle_indices = np.array(range(triangles.shape[0]))
     bvh_buffer = np.zeros((11))
 
@@ -186,13 +185,17 @@ def run_split(triangles, num_split):
     # Init the parent
     init_parent(bvh_buffer, triangles)
     bvhs.append(bvh_buffer)
-
-    for i in tqdm(range(num_split), desc="Initializing BVHs..."):
+    i = 0
+    for _ in tqdm(range(max_iter), desc="Initializing BVHs..."):
         bvh = bvhs[i]
         start_index = int(bvh[START_INDEX])
         end_index = int(start_index + bvh[COUNT])
         tri_indices = triangle_indices[start_index:end_index]
         arranged_indices = np.zeros_like(tri_indices)
+
+        if bvh[COUNT] <= max_leaf_size:
+            i += 1
+            continue
 
         bvh_buffer_children = np.zeros((2, 11))
         split(bvh,
@@ -213,5 +216,6 @@ def run_split(triangles, num_split):
 
         # Update the triangle indices
         triangle_indices[start_index:end_index] = arranged_indices
+        i += 1
 
     return np.stack(bvhs), triangle_indices

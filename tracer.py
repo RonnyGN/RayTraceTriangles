@@ -23,48 +23,37 @@ def trace_ray_path(ray: np.ndarray,
 
     closest_shape_idx = 0
     stack_ptr.append(0)
+    min_dist = 1e9
     # Check box inetrsection
     while True:
         if len(stack_ptr) == 0:
             break
         box_id = stack_ptr.pop()
-        hit = box_intersection(bvh[box_id], ray=ray)
+        hit, dist = box_intersection(bvh[box_id], ray=ray)
         idA = int(bvh[box_id, CHILDA])
         idB = int(bvh[box_id, CHILDB])
-        bvh[box_id, CHILDA] = 0.0
-        bvh[box_id, CHILDB] = 0.0
 
-        if hit and (idA != 0.0):
-            stack_ptr.append(idA)
-            stack_ptr.append(idB)
+        if hit and ((idA != 0.0) or (idB != 0.0)):
+            if idA != 0.0: stack_ptr.append(idA)
+            if idB != 0.0: stack_ptr.append(idB)
 
-        elif hit and (idA == 0.0):
+        elif hit and ((idA == 0.0) and (idB == 0.0)):
             start_index = int(bvh[box_id, START_INDEX])
             end_index = int(bvh[box_id, COUNT] + start_index)
-            if bvh[box_id, COUNT] != 0.0: 
-                min_dist = 1e9
+            if (bvh[box_id, COUNT] != 0.0) and (box_id != -1): 
                 for idx in triangle_indices[start_index:end_index]:
-                    # Index 0 corresponds to sky
-                    if idx != 0:
-                        intersection = calc_triangle_intersection(ray, world[idx], ray_buffer)
-                        if intersection < 0.0:
-                            # The ray misses
-                            pass
-                        else:
-                            if min_dist > intersection:
-                                min_dist = intersection
-                                closest_shape_idx = idx
-                            else:
-                                pass
-                ox, oy, oz = ray[0], ray[1], ray[2]
-                dx, dy, dz = ray[3], ray[4], ray[5]
-                point_hit[0], point_hit[1], point_hit[2] = ox + dx*min_dist, oy + dy*min_dist, oz + dz*min_dist
-                if closest_shape_idx != 0: return closest_shape_idx 
-        elif not hit:
-            pass
-    
-    closest_shape_idx = 0
-    min_dist = 1e9
+                    intersection = calc_triangle_intersection(ray, world[idx+3], ray_buffer)
+                    if (min_dist > intersection) and (intersection > 0.0):
+                        min_dist = intersection
+                        closest_shape_idx = idx + 3                            
+
+    ox, oy, oz = ray[0], ray[1], ray[2]
+    dx, dy, dz = ray[3], ray[4], ray[5]
+    point_hit[0], point_hit[1], point_hit[2] = ox + dx*min_dist, oy + dy*min_dist, oz + dz*min_dist
+    if closest_shape_idx != 0: return closest_shape_idx 
+
+    closest_shape_idx = 0 
+    min_dist = 1e9       
     for idx in VIP_INDICES:
         # Index 0 corresponds to sky
         if idx != 0:
