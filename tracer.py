@@ -33,6 +33,9 @@ def trace_ray_path(ray: np.ndarray,
         idA = int(bvh[box_id, CHILDA])
         idB = int(bvh[box_id, CHILDB])
 
+        if dist > min_dist or (dist == -1.0):
+            continue
+
         if hit and ((idA != 0.0) or (idB != 0.0)):
             if idA != 0.0: stack_ptr.append(idA)
             if idB != 0.0: stack_ptr.append(idB)
