@@ -71,6 +71,7 @@ def box_intersection(box, ray):
     else:
         return False, -1.0
     
+# Utilizing Mid point separation, SAH is a possible idea
 @njit
 def axis_len(bvh):
     return abs(bvh[MAX_X] - bvh[MIN_X]), abs(bvh[MAX_Y] - bvh[MIN_Y]), abs(bvh[MAX_Z] - bvh[MIN_Z])
@@ -134,6 +135,8 @@ def split(bvh, index, triangles, triangle_indices, childA_buffer, childB_buffer,
                 is_right = True
                 right_count += 1
 
+            # Fill the arranged indices buffer with left indices from extreme left, and right
+            # indices from extreme right
             if is_left:
                 arranged_indices[left_count - 1] = i
             elif is_right:
@@ -193,6 +196,8 @@ def run_split(triangles, max_iter, max_leaf_size=6):
         tri_indices = triangle_indices[start_index:end_index]
         arranged_indices = np.zeros_like(tri_indices)
 
+        # If the number of triangles in a box is equal to orless than the max_leaf_size, don't split it 
+        # further
         if bvh[COUNT] <= max_leaf_size:
             i += 1
             continue

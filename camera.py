@@ -24,7 +24,7 @@ def init_camera_ray(i: int, j: int, fov: float, width: int, height: int, output_
     output_buffer[4] = y/magn
     output_buffer[5] = z/magn
 
-    # Colours
+    # Colours to be initialiased to white, that is [1.0, 1.0, 1.0]
     output_buffer[6] = 1.0
     output_buffer[7] = 1.0
     output_buffer[8] = 1.0

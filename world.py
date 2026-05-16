@@ -18,7 +18,7 @@ class Object:
             for line in tqdm(f.readlines(), desc=f"Loading object {self.name}..."):
                 line = line.split(' ')
 
-                # Check if first letter is v, else discard
+                # Check if first letter is v/vn/f, else discard
                 if line[0] == 'v':
                     vertex = np.array([float(i) for i in line[1:]])
 
@@ -27,10 +27,7 @@ class Object:
                     vertex += self.translate_coords
                     
                     vertices.append(vertex)
-                elif line[0] == 'vn':
-                    normal = np.array([float(i) for i in line[1:]])
-                    normal = normal @ self.rotation_matrix.T
-                    normals.append(normal)
+
                 elif line[0] == 'f':
                     face_parts = [p.split('/') for p in line[1:]]
                     v_idxs = [int(p[0]) - 1 for p in face_parts]
@@ -68,6 +65,8 @@ class Object:
     def translate(self, x, y, z):
         self.translate_coords = self.translate_coords + np.array([x, y, z])
 
+    # Theta rotates along the y axis, and phi along the z axis. Phi would generally be not useful, similarly
+    # Very niche applications require rotation along the x axis
     def rotate(self, theta, phi):
         rot_matrix = np.array([
             [np.cos(phi)*np.cos(theta), -np.sin(phi), np.cos(phi)*np.sin(theta)],
@@ -77,6 +76,4 @@ class Object:
         self.rotation_matrix = rot_matrix @ self.rotation_matrix
     
     def scale(self, factor):
-        self.scale_factor *= factor
-                    
-                    
+        self.scale_factor *= factor                   

@@ -51,7 +51,6 @@ def calc_triangle_intersection(ray: np.ndarray, triangle: np.ndarray, ray_buffer
     else:
         return -1.0
 
-# It is to be ensured that point lies on the triangle
 @njit
 def triangle_normal(triangle: np.ndarray, out_buffer: np.ndarray):
     out_buffer[0], out_buffer[1], out_buffer[2] = triangle[10], triangle[11], triangle[12]

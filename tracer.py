@@ -8,8 +8,11 @@ from tqdm import tqdm
 
 # Material should be of format: [r, g, b, luminance, reflectivity]
 # Rays should be of format: [origin_x, origin_y, origin_z, dir_x, dir_y, dir_z, r, g, b]
-# World would be a 2D array where each row represents a shape
+# World would be a 2D array where each row represents a triangle
 # ID of 0 corresponds to environment color. that is, sky
+
+# VIP indices are [0, 1, 2], which are not included in the bounding box due to large sizes (usually the sky,
+# the plane and the source)
 VIP_INDICES = np.array([0, 1, 2])
 @njit
 def trace_ray_path(ray: np.ndarray,
@@ -18,33 +21,40 @@ def trace_ray_path(ray: np.ndarray,
                    ray_buffer: np.ndarray,
                    bvh: np.ndarray,
                    triangle_indices: np.ndarray,
-                   stack_ptr,
-                   debug_num=10):
+                   stack_ptr):
 
     closest_shape_idx = 0
     stack_ptr.append(0)
     min_dist = 1e9
-    # Check box inetrsection
+
     while True:
+
+        # End once stack_ptr is empty
         if len(stack_ptr) == 0:
             break
+
+
         box_id = stack_ptr.pop()
         hit, dist = box_intersection(bvh[box_id], ray=ray)
         idA = int(bvh[box_id, CHILDA])
         idB = int(bvh[box_id, CHILDB])
 
+        # Continue if the distance found is greater than the minimum distance found so far
         if dist > min_dist or (dist == -1.0):
             continue
-
+        
+        # Add children if the box has them
         if hit and ((idA != 0.0) or (idB != 0.0)):
             if idA != 0.0: stack_ptr.append(idA)
             if idB != 0.0: stack_ptr.append(idB)
 
+        # Run intersection checks on the triangles if the box is a leaf node
         elif hit and ((idA == 0.0) and (idB == 0.0)):
             start_index = int(bvh[box_id, START_INDEX])
             end_index = int(bvh[box_id, COUNT] + start_index)
             if (bvh[box_id, COUNT] != 0.0) and (box_id != -1): 
                 for idx in triangle_indices[start_index:end_index]:
+                    # idx + 3, because the first three indices are VIP indices
                     intersection = calc_triangle_intersection(ray, world[idx+3], ray_buffer)
                     if (min_dist > intersection) and (intersection > 0.0):
                         min_dist = intersection
@@ -53,6 +63,9 @@ def trace_ray_path(ray: np.ndarray,
     ox, oy, oz = ray[0], ray[1], ray[2]
     dx, dy, dz = ray[3], ray[4], ray[5]
     point_hit[0], point_hit[1], point_hit[2] = ox + dx*min_dist, oy + dy*min_dist, oz + dz*min_dist
+
+    # Check if the closest idx is not 0, as 0 means the ray has missed, check intersection with VIP
+    # indices after that
     if closest_shape_idx != 0: return closest_shape_idx 
 
     closest_shape_idx = 0 
@@ -62,7 +75,6 @@ def trace_ray_path(ray: np.ndarray,
         if idx != 0:
             intersection = calc_triangle_intersection(ray, world[idx], ray_buffer)
             if intersection < 0.0:
-                # The ray misses
                 pass
             else:
                 if min_dist > intersection:
@@ -85,7 +97,7 @@ def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, tria
     point_x, point_y, point_z = point[0], point[1], point[2]
     dx, dy, dz = ray[3], ray[4], ray[5]
 
-    # Sample random point on the hemitriangle
+    # Sample random point on the hemisphere
     u_1 = np.random.random()
     u_2 = np.random.random()
 
@@ -116,6 +128,8 @@ def get_random_dir(ray: np.ndarray, reflectivity: float, point: np.ndarray, tria
     Ox, Oy, Oz = point_x + Nx * 1e-5, point_y + Ny * 1e-5, point_z + Nz * 1e-5
     ray_buffer[0], ray_buffer[1], ray_buffer[2] = Ox, Oy, Oz
     ray_buffer[3], ray_buffer[4], ray_buffer[5] = sampled_x, sampled_y, sampled_z
+
+    # This function also returns the dot product between the sampled ray and the normal
     return dot3(sampled_x, sampled_y, sampled_z, Nx, Ny, Nz)
 
 @njit
@@ -197,8 +211,7 @@ def trace(i: int,
           pixel: np.ndarray,
           bvh: np.ndarray,
           triangle_indices: np.ndarray,
-          stack_ptr,
-          debug_num=10):
+          stack_ptr):
         RAY_BUFFER = 0
         POINT_BUFFER = 1
         RAY_BUFFER_2 = 8
@@ -211,7 +224,7 @@ def trace(i: int,
             bounce = num_bounces
             luminance = 0
             while bounce > 0:
-                closest_shape_idx = trace_ray_path(ray=buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], bvh=bvh, triangle_indices=triangle_indices, debug_num=debug_num, stack_ptr=stack_ptr)
+                closest_shape_idx = trace_ray_path(ray=buffer[RAY_BUFFER], world=world, point_hit=buffer[POINT_BUFFER], ray_buffer=buffer[RAY_BUFFER_2], bvh=bvh, triangle_indices=triangle_indices, stack_ptr=stack_ptr)
                 if closest_shape_idx == 0:
                     material_idx = int(world[0, 0])
                     luminance += materials[material_idx, 3]
@@ -234,7 +247,7 @@ def trace(i: int,
                 buffer[RAY_BUFFER, 7] *= materials[material_idx, 1] * scaling_factor
                 buffer[RAY_BUFFER, 8] *= materials[material_idx, 2] * scaling_factor
                 bounce -= 1
-            #print("Luminance: ", luminance, "    \r")
+
         pixel[0] /= num_rays
         pixel[1] /= num_rays
         pixel[2] /= num_rays
@@ -246,17 +259,16 @@ def trace_rays(height: int,
                world: np.ndarray,
                source_idx: int,
                materials: np.ndarray,
-               fov: float, 
-               buffer: np.ndarray,
-               img_buffer: np.ndarray,
+               fov: float,
                bvh: np.ndarray,
                triangle_indices: np.ndarray,
-               stack_ptr,
-               debug_num=10):
+               buffer=np.zeros((11, 12)),
+               stack_ptr=List.empty_list(int64)
+               ):
     PIXEL_BUFFER = 7
+    img_buffer = np.zeros((width, height, 3))
     for i in tqdm(range(width), desc="Rendering..."):
         for j in range(height):
-            debug_num -= 1
             trace(i=i,
                   j=j,
                   height=height,
@@ -271,6 +283,6 @@ def trace_rays(height: int,
                   pixel=buffer[PIXEL_BUFFER],
                   bvh=bvh,
                   triangle_indices=triangle_indices,
-                  stack_ptr=stack_ptr,
-                  debug_num=debug_num)
+                  stack_ptr=stack_ptr)
             img_buffer[i, j, 0], img_buffer[i, j, 1], img_buffer[i, j, 2] = buffer[PIXEL_BUFFER, 0], buffer[PIXEL_BUFFER, 1], buffer[PIXEL_BUFFER, 2]
+    return img_buffer
