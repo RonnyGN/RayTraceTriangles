@@ -77,4 +77,4 @@ materials = np.array([
 
 ## Credits
 
-Thanks to hackmans for the Stanford Dragon model, available at https://sketchfab.com/3d-models/stanford-dragon-pbr-5d610f842a4542ccb21613d41bbd7ea1. The model is licensed under CC Attribution.
+Thanks to hackmans for the Stanford Dragon model, available at https://sketchfab.com/3d-models/stanford-dragon-pbr-5d610f842a4542ccb21613d41bbd7ea1. The model is licensed under ![CC Attribution](http://creativecommons.org/licenses/by/4.0/).
