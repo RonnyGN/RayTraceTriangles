@@ -33,6 +33,7 @@ obj = Object("model.obj", name="Model")
 obj.translate(x, y, z)
 obj.rotate(theta, phi)
 obj.scale(factor)
+triangles = obj.load_world(material_id)
 
 # Build BVH and render
 bvh, tri_indices = run_split(triangles, max_iter=100)
